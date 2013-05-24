@@ -2,10 +2,10 @@
 Contributors: dimensionmedia
 Donate link: http://davidbisset.com/
 Tags: twitter
-Requires at least: 3.6
-Tested up to: 3.6.1
+Requires at least: 3.5
+Tested up to: 3.5.1
 
-This plugin will search through recent tweets with embedded photos (containing a certain hashtag), and import those photos along with the tweet into WP's media gallery.
+This plugin will search through recent tweets (containing a certain hashtag or keyword), and import those photos along with some metadata into a custom post type.
 
 == Installation ==
 
@@ -18,6 +18,10 @@ This plugin will search through recent tweets with embedded photos (containing a
 You need to apply to Twitter to obtain a consumer key and consumer secret. You also need a setOAuthToken and setOAuthTokenSecret. All four of these you can update in the settings screen.
 
 == Changelog ==
+
+= 0.3 =
+* Significant changes to how plugin now works: instead of importing photos directly to the media gallery, we are using custom post types that store the metadata.
+* Better process for detecting new Instagram posts via the API
 
 = 0.1 =
 * Basic bare-bones plugin.
