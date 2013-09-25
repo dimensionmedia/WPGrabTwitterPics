@@ -2,8 +2,8 @@
 /*
 Plugin Name: Grab Twitter Pics
 Plugin URI: http://www.davidbisset.com/wp-grab-twitter-pics
-Description: This plugin will search through recent tweets with embedded photos (containing a certain hashtag), and import those photos along with the tweet into WP's media gallery.
-Version: 0.1
+Description: This plugin will search through recent tweets with embedded photos (containing a certain hashtag), and import those photos along with the tweet metadata into a custom post type.
+Version: 0.3
 Author: David Bisset
 Author URI: http://www.davidbisset.com
 Author Email: dbisset@dimensionmedia.com
@@ -26,21 +26,6 @@ License:
 
 */
 
-
-/**
- * TODO: 
- *
- * Rename this class to a proper name for your plugin. Give a proper description of
- * the plugin, it's purpose, and any dependencies it has.
- *
- * Use PHPDoc directives if you wish to be able to document the code using a documentation
- * generator.
- *
- * @version	1.0
- */
- 
-error_reporting(E_ALL);
- 
 class WPGrabTwitterPics {
 
 	/*--------------------------------------------*
@@ -76,12 +61,12 @@ class WPGrabTwitterPics {
 		/**
 		 * Load needed include files
 		 */
-		require( dirname( __FILE__ ) . '/includes/twitter.php' );
+		require_once( dirname( __FILE__ ) . '/includes/twitter.php' );
 
 		/**
 		 * Define globals
 		 */
-    	define("WP_GRAB_TWITTER_PICS_PERMISSIONS", "manage_options");
+    		if ( ! defined('WP_GRAB_TWITTER_PICS_PERMISSIONS') ) define("WP_GRAB_TWITTER_PICS_PERMISSIONS", "manage_options");
 
 		/**
 		 * Load plugin text domain
@@ -208,14 +193,14 @@ class WPGrabTwitterPics {
 	 * Registers and enqueues plugin-specific styles.
 	 */
 	public function register_wpgtp_styles() {
-		wp_enqueue_style( 'plugin-name-plugin-styles', plugins_url( 'css/display.css', __FILE__ ) );
+		// wp_enqueue_style( 'plugin-name-plugin-styles', plugins_url( 'css/display.css', __FILE__ ) );
 	} // end register_wpgtp_styles
 
 	/**
 	 * Registers and enqueues plugin-specific scripts.
 	 */
 	public function register_wpgtp_scripts() {
-		wp_enqueue_script( 'plugin-name-plugin-script', plugins_url( 'js/display.js', __FILE__ ), array( 'jquery' ) );
+		// wp_enqueue_script( 'plugin-name-plugin-script', plugins_url( 'js/display.js', __FILE__ ), array( 'jquery' ) );
 	} // end register_wpgtp_scripts
 
 	/**
@@ -427,13 +412,13 @@ class WPGrabTwitterPics {
 	        'labels' => $labels,
 	        'hierarchical' => false,
 	        'description' => 'Stored tweets from Twitter.',
-	        'supports' => array( 'title', 'page-attributes', 'editor', 'thumbnail' ),        
+	        'supports' => array( 'title', 'page-attributes', 'editor', 'thumbnail', 'comments' ),        
 	        'public' => true,
 	        'show_ui' => true,
 	        'show_in_menu' => true,
 	        'show_in_nav_menus' => false,
 	        'publicly_queryable' => true,
-	        'exclude_from_search' => true,
+	        'exclude_from_search' => false,
 	        'has_archive' => false,
 	        'query_var' => true,
 	        'can_export' => true,
@@ -644,16 +629,34 @@ class WPGrabTwitterPics {
     } // end wpgtp_clear_settings
     
 	/*
-	 * wpgtp_grab_twitter_posts() is the bulk of the plugin. It interacts with the twitter class to parse through tweets via the
-	 * hashtag, find images, and save those images (along with tweet metadata) as a WordPress media item
+	 * wpgtp_grab_twitter_posts() wraps around wpgtp_do_grab_twitter_posts() and handles security when
+	 * the grabbing is called manually via the WordPress backend on the grab page
 	 */
 	
 	public function wpgtp_grab_twitter_posts() {
 
 		// check nonce
-        if ( ! wp_verify_nonce( $_POST[ 'wp-grab-twitter-pics' . '_nonce' ], 'wpgtp_grab_twitter_posts' ) )
-            die( 'Invalid nonce.' . var_export( $_POST, true ) );
-            
+		if ( ! wp_verify_nonce( $_POST[ 'wp-grab-twitter-pics' . '_nonce' ], 'wpgtp_grab_twitter_posts' ) )
+			die( 'Invalid nonce.' . var_export( $_POST, true ) );
+
+		// since nonce checks out, call the main function
+		$msg = $this->wpgtp_do_grab_twitter_posts();
+
+		$url = add_query_arg( 'msg', $msg, urldecode( $_POST['_wp_http_referer'] ) );
+
+		wp_safe_redirect( $url );
+		exit;
+
+	}
+    
+    
+	/*
+	 * wpgtp_do_grab_twitter_posts() is the bulk of the plugin. It interacts with the twitter class to parse through tweets via the
+	 * hashtag, find images, and save those images (along with tweet metadata) as a WordPress media item
+	 */    
+    
+	public function wpgtp_do_grab_twitter_posts() {
+	            
         // proceeding forward - woot!
         
         // let's grab the hashtag, henceforth known as the "tag"
@@ -666,32 +669,32 @@ class WPGrabTwitterPics {
 		// set tokens
 		$twitter->setOAuthToken(esc_attr( get_option( 'wpgtp-setOAuthToken' ) ));
 		$twitter->setOAuthTokenSecret(esc_attr( get_option( 'wpgtp-setOAuthTokenSecret' ) ));
-		
-		// check and see if the twitter max_id exists in the site options - so we don't have to parse tweets we've parsed already		
-		$twitter_max_id = get_option( 'wpgtp_twitter_gallery_max_id' );
-		
+			
 		/**
 		 * The following is the params for the searchTweets function - just leaving this here for easy reference
 		 * and to understand what you are reading as you examine the next few lines of code.
 		 *
-		 * @return	array
-		 * @param	string $q						Search query. Should be URL encoded. Queries will be limited by complexity.
-		 * @param 	string[optional] $lang			Restricts tweets to the given language, given by an ISO 639-1 code.
-		 * @param 	string[optional] $locale		Specify the language of the query you are sending (only ja is currently effective). This is intended for language-specific clients and the default should work in the majority of cases.
-		 * @param 	int[optional] $rpp				The number of tweets to return per page, up to a max of 100.
-		 * @param 	int[optional] $page				The page number (starting at 1) to return, up to a max of roughly 1500 results (based on rpp * page).
-		 * @param 	string[optional] $sinceId		Returns results with an ID greater than (that is, more recent than) the specified ID. There are limits to the number of Tweets which can be accessed through the API. If the limit of Tweets has occured since the since_id, the since_id will be forced to the oldest ID available.
-		 * @param 	string[optional] $until			Returns tweets generated before the given date. Date should be formatted as YYYY-MM-DD.
-		 * @param 	string[optional] $geocode		Returns tweets by users located within a given radius of the given latitude/longitude. The location is preferentially taking from the Geotagging API, but will fall back to their Twitter profile. The parameter value is specified by "latitude,longitude,radius", where radius units must be specified as either "mi" (miles) or "km" (kilometers). Note that you cannot use the near operator via the API to geocode arbitrary locations; however you can use this geocode parameter to search near geocodes directly.
-		 * @param 	bool[optional] $showUser		When true, prepends ":" to the beginning of the tweet. This is useful for readers that do not display Atom's author field. The default is false.
-		 * @param 	string[optional] $resultType	Specifies what type of search results you would prefer to receive. The current default is "mixed." Valid values include: mixed, recent, popular.
-		 */
-				
-		 $twitter_max_id = false;
-				
-		if ( $twitter_max_id ) {
+	    /**
+	     * Returns tweets that match a specified query.
+	     *
+	     * @param  string           $q               A UTF-8, URL-encoded search query of 1,000 characters maximum, including operators. Queries may additionally be limited by complexity.
+	     * @param  string[optional] $geocode         Returns tweets by users located within a given radius of the given latitude/longitude. The location is preferentially taking from the Geotagging API, but will fall back to their Twitter profile. The parameter value is specified by "latitude,longitude,radius", where radius units must be specified as either "mi" (miles) or "km" (kilometers). Note that you cannot use the near operator via the API to geocode arbitrary locations; however you can use this geocode parameter to search near geocodes directly. A maximum of 1,000 distinct "sub-regions" will be considered when using the radius modifier.
+	     * @param  string[optional] $lang            Restricts tweets to the given language, given by an ISO 639-1 code. Language detection is best-effort.
+	     * @param  string[optional] $locale          Specify the language of the query you are sending (only ja is currently effective). This is intended for language-specific consumers and the default should work in the majority of cases.
+	     * @param  string[optional] $resultType      Specifies what type of search results you would prefer to receive. The current default is "mixed." Valid values include: mixed: Include both popular and real time results in the response, recent: return only the most recent results in the response, popular: return only the most popular results in the response.
+	     * @param  int[optional]    $count           The number of tweets to return per page, up to a maximum of 100. Defaults to 15. This was formerly the "rpp" parameter in the old Search API.
+	     * @param  string[optional] $until           Returns tweets generated before the given date. Date should be formatted as YYYY-MM-DD. Keep in mind that the search index may not go back as far as the date you specify here.
+	     * @param  string[optional] $sinceId         Returns results with an ID greater than (that is, more recent than) the specified ID. There are limits to the number of Tweets which can be accessed through the API. If the limit of Tweets has occured since the since_id, the since_id will be forced to the oldest ID available.
+	     * @param  string[optional] $maxId           Returns results with an ID less than (that is, older than) or equal to the specified ID.
+	     * @param  bool[optional]   $includeEntities The entities node will be disincluded when set to false.
+	     * @return array
+	     */
+						 
+		$twitter_max_id = get_option( 'wpgtp_twitter_gallery_max_id', 0 );			
+
+		if ( $twitter_max_id && $twitter_max_id > 0 ) {
 			// get search timeline w/ max_id
-			$response = $twitter->searchTweets($tag, null, null, null, 'recent', 100, 1, $twitter_max_id);		
+			$response = $twitter->searchTweets($tag, null, null, null, 'recent', 100, null, $twitter_max_id);		
 		} else {
 			// get search timeline w/o the max_id
 			$response = $twitter->searchTweets($tag, null, null, null, 'recent', 100 );	
@@ -706,16 +709,20 @@ class WPGrabTwitterPics {
 			$image_counter = 0;
 			$video_counter = 0;
 			$tw_medias = array();
+			$max_id_from_twitter = 0;
+			$grabbed_latest = false;
 			
 			if ( !empty($response['statuses']) ) {
-			
-//				echo "-<br/>"; print_r ($response['statuses'][0]['id']); exit;
-				
-				$current_twitter_gallery_max_id = get_option( 'wpgtp_twitter_last_grab', 0 );				
+
+//				echo "-<br/>"; print_r ($response); exit;
 				
 				// ok, set a site var for the "max_id" that twitter gives us - so next time we don't have to parse these tweets again
 				
-				if ( isset( $response['statuses'][0]['id'] ) && $response['statuses'][0]['id'] > $current_twitter_gallery_max_id ) {
+				$max_id_from_twitter = $response['search_metadata']['max_id']; // grab the max_id from the twitter response
+				
+				if ( isset( $max_id_from_twitter ) && $max_id_from_twitter > $twitter_max_id ) { // if we gotten this far, this should be true but it's a double-check
+				
+					$grabbed_latest = true; // we made it this far, so make this true
 				
 					// now go through the tweets response, only adding tweets that we don't already have
 				
@@ -840,16 +847,17 @@ class WPGrabTwitterPics {
 					} // foreach
 					
 					
-					update_option( 'wpgtp_twitter_gallery_max_id', $response['search_metadata']['max_id'] );
+				} // if max_id
+				
+				if ( $max_id_from_twitter > 0 ) { // an attempt was made so update the max id and last grab date
+				
+					update_option( 'wpgtp_twitter_gallery_max_id', $max_id_from_twitter );
 							
 					// let's update the "last tried" field so someone knows when we last attempted to look
 				
-					update_option( 'wpgtp_twitter_last_grab', time() );						
-					
-					
-				} // if max_id
+					update_option( 'wpgtp_twitter_last_grab', time() );					
 				
-				
+				}
 			
 			} else {
 				
@@ -880,8 +888,7 @@ class WPGrabTwitterPics {
 					  'post_date'		=> date('Y-m-d H:i:s', strtotime($new_tweet['tw_created_at'])),
 					  'post_type'	  	=> 'wpgtp_tweets',
 					  'post_status'   	=> 'publish',
-					  'ping_status'	  	=> 'closed',
-					  'comment_status'	=> 'closed'
+					  'ping_status'	  	=> 'closed'
 					);
 					
 					// Insert the post into the database
@@ -974,13 +981,8 @@ class WPGrabTwitterPics {
 			$msg = "$image_counter tweets pulled from Twitter.";
 
 		}
-
-
-		$url = add_query_arg( 'msg', $msg, urldecode( $_POST['_wp_http_referer'] ) );
-
-        wp_safe_redirect( $url );
-        exit;
-
+		
+		return $msg;
 
 	} // end wpgtp_grab_twitter_posts()
 	

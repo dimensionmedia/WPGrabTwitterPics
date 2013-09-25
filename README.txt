@@ -2,8 +2,8 @@
 Contributors: dimensionmedia
 Donate link: http://davidbisset.com/
 Tags: twitter
-Requires at least: 3.5
-Tested up to: 3.5.1
+Requires at least: 3.6
+Tested up to: 3.6.1
 
 This plugin will search through recent tweets (containing a certain hashtag or keyword), and import those photos along with some metadata into a custom post type.
 
@@ -18,6 +18,10 @@ This plugin will search through recent tweets (containing a certain hashtag or k
 You need to apply to Twitter to obtain a consumer key and consumer secret. You also need a setOAuthToken and setOAuthTokenSecret. All four of these you can update in the settings screen.
 
 == Changelog ==
+
+= 0.4 =
+* standalone_cron.php added for real-time cron jobs
+* Significant cleanup of plugin code
 
 = 0.3 =
 * Significant changes to how plugin now works: instead of importing photos directly to the media gallery, we are using custom post types that store the metadata.
